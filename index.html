@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PNG → JPEG — fast, private, in your browser</title>
+<meta name="description" content="Convert a whole batch of PNG images to JPEG right in your browser. No uploads, no accounts, no watermarks.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23d97706'/%3E%3Cpath d='M20 20h10v18a8 8 0 0 1-8 8h-2v-8h0a4 4 0 0 0 4-4V28h-4z' fill='white'/%3E%3Cpath d='M36 20h8v24h-8z' fill='white' opacity='.55'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #16181d;
+    --ink-soft: #3d4351;
+    --muted: #6b7280;
+    --border: #e6e8ec;
+    --border-strong: #d3d7de;
+    --png: #2563eb;
+    --png-tint: #eff4ff;
+    --jpg: #d97706;
+    --jpg-tint: #fdf3e3;
+    --green: #15803d;
+    --green-tint: #e8f6ec;
+    --amber-ink: #92610a;
+    --amber-tint: #fdf3e3;
+    --red: #dc2626;
+    --red-tint: #fdecec;
+    --checker-a: #ececef;
+    --checker-b: #f9fafb;
+    --btn-ink: #ffffff;
+    --shadow: 0 1px 2px rgba(16, 20, 28, .05), 0 8px 24px -12px rgba(16, 20, 28, .12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115;
+      --card: #171b21;
+      --ink: #e8eaee;
+      --ink-soft: #c3c8d1;
+      --muted: #98a1af;
+      --border: #252b34;
+      --border-strong: #343c48;
+      --png: #60a5fa;
+      --png-tint: #16233c;
+      --jpg: #f5a623;
+      --jpg-tint: #332611;
+      --green: #4ade80;
+      --green-tint: #12301e;
+      --amber-ink: #f5b04c;
+      --amber-tint: #332611;
+      --red: #f87171;
+      --red-tint: #3a1a1a;
+      --checker-a: #20252d;
+      --checker-b: #181d24;
+      --btn-ink: #0f1115;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px -12px rgba(0, 0, 0, .5);
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 20px; }
+
+  /* ---------- header ---------- */
+  .site-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 0 6px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; font-size: 15px; letter-spacing: -0.01em; }
+  .logo-chip { font-size: 11px; font-weight: 800; letter-spacing: .05em; padding: 4px 8px; border-radius: 7px; color: #fff; }
+  .logo-chip.png { background: var(--png); color: #fff; }
+  .logo-chip.jpg { background: var(--jpg); color: #fff; }
+  .brand svg { color: var(--muted); }
+  .header-note { font-size: 12.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .header-note svg { color: var(--green); flex: none; }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 34px 0 6px; }
+  h1 { margin: 0 0 12px; font-size: clamp(30px, 5.4vw, 46px); line-height: 1.06; letter-spacing: -0.032em; font-weight: 800; text-wrap: balance; }
+  h1 .arr { color: var(--jpg); }
+  .hero .sub { margin: 0; color: var(--muted); font-size: 16.5px; max-width: 600px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .chip { font-size: 12px; font-weight: 600; color: var(--ink-soft); background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; }
+
+  /* ---------- dropzone ---------- */
+  .dropzone {
+    margin: 26px 0 18px;
+    border: 2px dashed var(--border-strong);
+    border-radius: 18px;
+    background:
+      radial-gradient(var(--border) 1px, transparent 1.5px) 0 0 / 20px 20px,
+      var(--card);
+    padding: 46px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s ease, background-color .15s ease, transform .15s ease, box-shadow .15s ease;
+  }
+  .dropzone:hover { border-color: var(--ink-soft); }
+  .dropzone:focus-visible { outline: 2px solid var(--png); outline-offset: 3px; }
+  .dropzone.drag {
+    border-color: var(--png);
+    background-color: var(--png-tint);
+    transform: scale(1.004);
+    box-shadow: var(--shadow);
+  }
+  .dz-icon { color: var(--muted); }
+  .dropzone.drag .dz-icon { color: var(--png); }
+  .dz-title { font-weight: 700; font-size: 18px; margin-top: 12px; letter-spacing: -0.01em; }
+  .dz-sub { color: var(--muted); font-size: 14px; margin-top: 6px; }
+  kbd {
+    font-family: inherit; font-size: 11.5px; font-weight: 700;
+    border: 1px solid var(--border-strong); border-bottom-width: 2px;
+    border-radius: 6px; padding: 1.5px 6px; background: var(--card); color: var(--ink-soft);
+  }
+
+  /* ---------- controls ---------- */
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 18px 26px; align-items: flex-end;
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 18px 20px; margin-bottom: 14px; box-shadow: var(--shadow);
+  }
+  .control-group { display: flex; flex-direction: column; gap: 8px; }
+  .control-label { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+  .quality-row { display: flex; align-items: center; gap: 12px; }
+  input[type="range"] { accent-color: var(--ink); width: 190px; height: 24px; margin: 0; }
+  .q-val {
+    min-width: 48px; text-align: center; font-weight: 800; font-size: 14px;
+    font-variant-numeric: tabular-nums; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px;
+  }
+  .swatches { display: flex; align-items: center; gap: 10px; min-height: 34px; }
+  .swatch {
+    width: 28px; height: 28px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15);
+    background: var(--c); cursor: pointer; padding: 0;
+  }
+  .swatch.sel { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .swatch.custom { position: relative; border-style: dashed; border-color: var(--border-strong); background: var(--card); overflow: hidden; }
+  .swatch.custom input[type="color"] {
+    appearance: none; -webkit-appearance: none; width: 200%; height: 200%;
+    margin: -50%; border: none; padding: 0; cursor: pointer; background: transparent;
+  }
+  .matte-hint { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .btn-row { display: flex; gap: 10px; margin-left: auto; align-items: center; flex-wrap: wrap; }
+  .btn {
+    appearance: none; border-radius: 11px; padding: 11px 20px; min-height: 44px;
+    font-weight: 700; font-size: 15px; font-family: inherit; letter-spacing: -0.01em;
+    border: 1px solid transparent; cursor: pointer;
+    transition: background .15s ease, border-color .15s ease, transform .06s ease, color .15s ease;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .btn:active { transform: scale(.98); }
+  .btn:focus-visible, .icon-btn:focus-visible, .swatch:focus-visible { outline: 2px solid var(--png); outline-offset: 2px; }
+  .btn-primary { background: var(--ink); color: var(--btn-ink); }
+  .btn-primary:hover { background: var(--ink-soft); }
+  .btn-primary:disabled { opacity: .55; cursor: wait; }
+  .btn-outline { background: var(--card); border-color: var(--border-strong); color: var(--ink); }
+  .btn-outline:hover { border-color: var(--ink); }
+  .btn-ghost { background: transparent; color: var(--muted); }
+  .btn-ghost:hover { color: var(--red); }
+
+  .status { font-size: 14px; color: var(--muted); min-height: 22px; margin: 0 2px 14px; }
+  .status strong { color: var(--ink); }
+
+  /* ---------- totals ---------- */
+  .totals {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 14px 30px;
+    background: var(--ink); color: #fff; border-radius: 16px;
+    padding: 16px 22px; margin-bottom: 20px;
+  }
+  .totals .t-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; opacity: .62; }
+  .totals .t-val { font-weight: 800; font-size: 19px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .totals .t-arrow { color: var(--jpg); font-size: 20px; font-weight: 800; margin-top: 14px; }
+  .totals .t-save { margin-left: auto; }
+  .save-chip { background: #22c55e; color: #052e12; font-weight: 800; font-size: 13.5px; padding: 6px 13px; border-radius: 999px; white-space: nowrap; }
+  .save-chip.grow { background: #f5b04c; color: #3a2503; }
+
+  /* ---------- grid / cards ---------- */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 16px; padding-bottom: 34px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    overflow: hidden; box-shadow: var(--shadow);
+    animation: rise .28s ease both;
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .card:hover { transform: translateY(-2px); }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .thumb {
+    position: relative; aspect-ratio: 4 / 3;
+    display: flex; align-items: center; justify-content: center;
+    border-bottom: 1px solid var(--border);
+    background:
+      conic-gradient(var(--checker-a) 90deg, var(--checker-b) 90deg 180deg, var(--checker-a) 180deg 270deg, var(--checker-b) 270deg) 0 0 / 18px 18px;
+  }
+  .thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .card.conv .thumb img { opacity: .55; }
+  .badge {
+    position: absolute; top: 9px; left: 9px; z-index: 1;
+    font-size: 10.5px; font-weight: 800; letter-spacing: .06em;
+    color: #fff; background: var(--png); padding: 3px 8px; border-radius: 6px;
+  }
+  .badge.jpg { background: var(--jpg); }
+  .card-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 7px; }
+  .file-name { font-weight: 600; font-size: 13.5px; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-dims { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .size-row { display: flex; align-items: baseline; gap: 7px; font-size: 13px; font-variant-numeric: tabular-nums; flex-wrap: wrap; }
+  .size-before { color: var(--muted); }
+  .size-row svg { color: var(--muted); align-self: center; }
+  .size-after { font-weight: 800; }
+  .pill {
+    display: inline-flex; align-items: center; width: max-content;
+    font-size: 11px; font-weight: 800; letter-spacing: .02em;
+    padding: 3px 9px; border-radius: 999px; font-variant-numeric: tabular-nums;
+  }
+  .pill.wait { background: var(--bg); color: var(--muted); border: 1px solid var(--border); }
+  .pill.save { background: var(--green-tint); color: var(--green); }
+  .pill.grow { background: var(--amber-tint); color: var(--amber-ink); }
+  .pill.err { background: var(--red-tint); color: var(--red); }
+  .card-actions { display: flex; gap: 8px; margin-top: 3px; }
+  .icon-btn {
+    min-height: 38px; border-radius: 9px; border: 1px solid var(--border-strong);
+    background: var(--card); color: var(--ink); font-weight: 700; font-size: 13px;
+    font-family: inherit; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    transition: border-color .15s ease, color .15s ease, background .15s ease;
+  }
+  .icon-btn:hover { border-color: var(--ink); }
+  .icon-btn:disabled { opacity: .45; cursor: not-allowed; }
+  .icon-btn.dl { flex: 1; }
+  .icon-btn.rm { width: 42px; flex: none; color: var(--muted); }
+  .icon-btn.rm:hover { border-color: var(--red); color: var(--red); background: var(--red-tint); }
+
+  /* ---------- footer ---------- */
+  footer { border-top: 1px solid var(--border); margin-top: 10px; padding: 22px 0 44px; color: var(--muted); font-size: 13px; }
+  footer .wrap { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+
+  @media (max-width: 640px) {
+    .hero { padding-top: 22px; }
+    .dropzone { padding: 34px 14px; }
+    .controls { align-items: stretch; flex-direction: column; }
+    .btn-row { margin-left: 0; }
+    .btn-row .btn { flex: 1; justify-content: center; }
+    .totals { gap: 12px 20px; padding: 14px 18px; }
+    .totals .t-save { margin-left: 0; width: 100%; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+  <header class="site-header wrap">
+    <div class="brand" aria-label="PNG to JPEG converter">
+      <span class="logo-chip png">PNG</span>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+      <span class="logo-chip jpg">JPG</span>
+    </div>
+    <div class="header-note">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+      Runs entirely in your browser — images never leave your device
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <h1>Convert PNG images to JPEG<span class="arr">.</span></h1>
+      <p class="sub">Drop in a whole batch, pick a quality, download. Everything is processed on your device — no uploads, no sign-ups, no watermarks.</p>
+      <div class="chips" aria-hidden="true">
+        <span class="chip">100% private</span>
+        <span class="chip">Batch conversion</span>
+        <span class="chip">Zip download</span>
+        <span class="chip">Free, unlimited</span>
+      </div>
+    </section>
+
+    <section class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Add PNG images: click to browse, drag and drop, or paste from clipboard">
+      <input type="file" id="fileInput" accept="image/png,.png" multiple hidden>
+      <svg class="dz-icon" width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-4.6-4.6a1.5 1.5 0 0 0-2.1 0L7 18"/>
+      </svg>
+      <div class="dz-title">Drop PNG images here</div>
+      <div class="dz-sub">or click to browse — you can also paste with <kbd>Ctrl</kbd>+<kbd>V</kbd></div>
+    </section>
+
+    <section class="controls" id="controls" hidden>
+      <div class="control-group">
+        <span class="control-label" id="qualityLabel">JPEG quality</span>
+        <div class="quality-row">
+          <input type="range" id="quality" min="1" max="100" value="90" aria-labelledby="qualityLabel">
+          <span class="q-val" id="qualityVal">90</span>
+        </div>
+      </div>
+      <div class="control-group">
+        <span class="control-label">Transparency becomes</span>
+        <div class="swatches" role="radiogroup" aria-label="Background color used where the PNG is transparent">
+          <button type="button" class="swatch sel" data-c="#ffffff" style="--c:#ffffff" role="radio" aria-checked="true" aria-label="White background"></button>
+          <button type="button" class="swatch" data-c="#000000" style="--c:#000000" role="radio" aria-checked="false" aria-label="Black background"></button>
+          <label class="swatch custom" title="Custom color">
+            <input type="color" id="customMatte" value="#2563eb" aria-label="Custom background color">
+          </label>
+        </div>
+        <span class="matte-hint">JPEG has no transparency — this fills transparent areas.</span>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btnConvert">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 8 4-4 4 4"/><path d="M9 4v12"/><path d="M19 16l-4 4-4-4"/><path d="M15 20V8"/></svg>
+          Convert all
+        </button>
+        <button class="btn btn-outline" id="btnZip" hidden>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          Download all (.zip)
+        </button>
+        <button class="btn btn-ghost" id="btnClear">Clear</button>
+      </div>
+    </section>
+
+    <p class="status" id="status" role="status" aria-live="polite"></p>
+
+    <section class="totals" id="totals" hidden aria-label="Conversion summary"></section>
+
+    <section class="grid" id="grid" aria-label="Queued images"></section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>Converted locally with the Canvas API — nothing is uploaded anywhere.</span>
+      <span>PNG → JPEG · free forever</span>
+    </div>
+  </footer>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (s) => document.querySelector(s);
+  const dropzone = $('#dropzone'), fileInput = $('#fileInput'), controls = $('#controls'),
+        grid = $('#grid'), statusEl = $('#status'), totalsBar = $('#totals'),
+        quality = $('#quality'), qualityVal = $('#qualityVal'),
+        btnConvert = $('#btnConvert'), btnZip = $('#btnZip'), btnClear = $('#btnClear'),
+        customMatte = $('#customMatte');
+
+  const state = new Map();      // id -> entry
+  let uid = 0;
+  let matte = '#ffffff';
+  let hasConvertedOnce = false;
+
+  const fmtBytes = (b) => {
+    if (!Number.isFinite(b)) return '—';
+    if (b < 1024) return b + ' B';
+    const units = ['KB', 'MB', 'GB'];
+    let i = -1;
+    do { b /= 1024; i++; } while (b >= 1024 && i < units.length - 1);
+    return (b >= 100 ? b.toFixed(0) : b.toFixed(1)) + ' ' + units[i];
+  };
+  function setStatus(msg) { statusEl.textContent = msg; }
+
+  function updateChrome() {
+    controls.hidden = state.size === 0;
+    btnZip.hidden = ![...state.values()].some(e => e.jpegBlob);
+  }
+
+  /* ---------- card DOM ---------- */
+  function buildCard(e) {
+    const art = document.createElement('article');
+    art.className = 'card';
+    art.id = 'card-' + e.id;
+    art.innerHTML =
+      '<div class="thumb"><img alt="">' +
+      '<span class="badge">PNG</span></div>' +
+      '<div class="card-body">' +
+      '<div class="file-name"></div>' +
+      '<div class="file-dims">Reading…</div>' +
+      '<div class="size-row">' +
+      '<span class="size-before"></span>' +
+      '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>' +
+      '<span class="size-after">—</span>' +
+      '</div>' +
+      '<span class="pill wait">waiting</span>' +
+      '<div class="card-actions">' +
+      '<button class="icon-btn dl" hidden>' +
+      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>' +
+      'Save</button>' +
+      '<button class="icon-btn rm" aria-label="Remove image">✕</button>' +
+      '</div></div>';
+
+    art.querySelector('.file-name').textContent = e.name;
+    art.querySelector('.file-name').title = e.name;
+    art.querySelector('img').src = e.objUrl;
+
+    const pill = art.querySelector('.pill');
+    art.querySelector('.dl').addEventListener('click', () => saveBlob(e.jpegBlob, e.outName));
+    art.querySelector('.rm').addEventListener('click', () => {
+      URL.revokeObjectURL(e.objUrl);
+      state.delete(e.id);
+      art.remove();
+      renderTotals();
+      updateChrome();
+      if (state.size === 0) resetConvertLabel();
+    });
+    e.pill = pill;
+    return art;
+  }
+
+  function cardOf(e) { return document.getElementById('card-' + e.id); }
+
+  /* ---------- intake ---------- */
+  function addFiles(list) {
+    const skipped = [];
+    let added = 0;
+    for (const f of list) {
+      if (!f) continue;
+      const isPng = f.type === 'image/png' || /\.png$/i.test(f.name);
+      if (!isPng) { skipped.push(f.name); continue; }
+      const e = {
+        id: ++uid, file: f, name: f.name,
+        outName: f.name.replace(/\.png$/i, '') + '.jpg',
+        width: 0, height: 0, jpegBlob: null, jpegSize: 0, error: null,
+        objUrl: URL.createObjectURL(f),
+      };
+      state.set(e.id, e);
+      grid.appendChild(buildCard(e));
+      probe(e);
+      added++;
+    }
+    updateChrome();
+    if (added) {
+      setStatus((hasConvertedOnce ? 'Added ' : '') + added + ' image' + (added > 1 ? 's' : '') + ' queued.');
+      dropzone.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    if (skipped.length) {
+      setStatus('Skipped ' + skipped.length + ' non-PNG file' + (skipped.length > 1 ? 's' : '') + ' — only PNG is supported.');
+    }
+  }
+
+  async function probe(e) {
+    try {
+      const bmp = await createImageBitmap(e.file);
+      e.width = bmp.width; e.height = bmp.height;
+      if (bmp.close) bmp.close();
+    } catch (_) {
+      try {
+        const url = URL.createObjectURL(e.file);
+        const img = await new Promise((res, rej) => {
+          const im = new Image();
+          im.onload = () => res(im);
+          im.onerror = rej;
+          im.src = url;
+        });
+        e.width = img.naturalWidth; e.height = img.naturalHeight;
+        URL.revokeObjectURL(url);
+      } catch (_) {
+        e.error = 'unreadable';
+      }
+    }
+    const card = cardOf(e);
+    if (!card) return;
+    card.querySelector('.file-dims').textContent =
+      e.error ? 'Could not read this file' :
+      (e.width ? e.width.toLocaleString() + ' × ' + e.height.toLocaleString() + ' px' : 'Reading…');
+  }
+
+  /* ---------- conversion ---------- */
+  function setPill(e, cls, text) {
+    e.pill.className = 'pill ' + cls;
+    e.pill.textContent = text;
+  }
+
+  function resetConvertLabel() {
+    hasConvertedOnce = false;
+    btnConvert.querySelector('svg').style.display = '';
+    btnConvert.lastChild.textContent = ' Convert all';
+  }
+
+  btnConvert.addEventListener('click', async () => {
+    const entries = [...state.values()].filter(e => !e.error);
+    if (!entries.length) { setStatus('Nothing to convert.'); return; }
+
+    btnConvert.disabled = true;
+    let ok = 0, done = 0;
+    for (const e of state.values()) {
+      const card = cardOf(e);
+      if (card) card.classList.add('conv');
+      if (!e.error) setPill(e, 'wait', 'converting…');
+    }
+
+    const q = quality.valueAsNumber / 100;
+    for (const e of entries) {
+      done++;
+      statusEl.append('Converting ');
+      const b = document.createElement('strong'); b.textContent = done + ' of ' + entries.length;
+      statusEl.append(b, '…');
+      try {
+        const bmp = await createImageBitmap(e.file);
+        const c = document.createElement('canvas');
+        c.width = bmp.width; c.height = bmp.height;
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = matte;
+        ctx.fillRect(0, 0, c.width, c.height);
+        ctx.drawImage(bmp, 0, 0);
+        if (bmp.close) bmp.close();
+        const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', q));
+        if (!blob || blob.size === 0) throw new Error('encode failed');
+        e.jpegBlob = blob;
+        e.jpegSize = blob.size;
+        e.error = null;
+        ok++;
+        paintResult(e);
+        renderTotals();
+      } catch (err) {
+        e.jpegBlob = null; e.jpegSize = 0;
+        setPill(e, 'err', 'conversion failed');
+      }
+      const card = cardOf(e);
+      if (card) card.classList.remove('conv');
+    }
+
+    btnConvert.disabled = false;
+    if (!hasConvertedOnce) {
+      hasConvertedOnce = true;
+      btnConvert.querySelector('svg').style.display = 'none';
+      btnConvert.lastChild.textContent = ' Convert again';
+    }
+    updateChrome();
+    const failed = entries.length - ok;
+    setStatus('Converted ' + ok + ' of ' + entries.length + ' image' + (entries.length > 1 ? 's' : '') + '.' +
+      (failed ? ' ' + failed + ' failed.' : ''));
+  });
+
+  function paintResult(e) {
+    const card = cardOf(e);
+    if (!card) return;
+    const badge = card.querySelector('.badge');
+    badge.textContent = 'JPG';
+    badge.classList.add('jpg');
+    card.querySelector('.size-after').textContent = fmtBytes(e.jpegSize);
+    const pct = e.file.size ? Math.round((1 - e.jpegSize / e.file.size) * 100) : 0;
+    if (pct >= 0) setPill(e, 'save', '−' + pct + '% smaller');
+    else setPill(e, 'grow', '+' + Math.abs(pct) + '% larger');
+    const dl = card.querySelector('.dl');
+    dl.hidden = false;
+  }
+
+  function renderTotals() {
+    const conv = [...state.values()].filter(e => e.jpegBlob);
+    if (!conv.length) { totalsBar.hidden = true; totalsBar.innerHTML = ''; return; }
+    const before = conv.reduce((s, e) => s + e.file.size, 0);
+    const after = conv.reduce((s, e) => s + e.jpegSize, 0);
+    const pct = before ? Math.round((1 - after / before) * 100) : 0;
+
+    totalsBar.innerHTML = '';
+    const mk = (label, val) => {
+      const d = document.createElement('div');
+      const l = document.createElement('div'); l.className = 't-label'; l.textContent = label;
+      const v = document.createElement('div'); v.className = 't-val'; v.textContent = val;
+      d.append(l, v);
+      return d;
+    };
+    totalsBar.append(mk('Images', String(conv.length)));
+    totalsBar.append(mk('PNG total', fmtBytes(before)));
+    const arrow = document.createElement('div');
+    arrow.className = 't-arrow'; arrow.textContent = '→'; arrow.setAttribute('aria-hidden', 'true');
+    totalsBar.append(arrow);
+    totalsBar.append(mk('JPEG total', fmtBytes(after)));
+    const saveWrap = document.createElement('div');
+    saveWrap.className = 't-save';
+    const chip = document.createElement('span');
+    chip.className = 'save-chip' + (pct < 0 ? ' grow' : '');
+    chip.textContent = pct >= 0 ? pct + '% smaller' : Math.abs(pct) + '% larger';
+    saveWrap.append(chip);
+    totalsBar.append(saveWrap);
+    totalsBar.hidden = false;
+  }
+
+  /* ---------- downloads ---------- */
+  function saveBlob(blob, name) {
+    const a = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+
+  btnZip.addEventListener('click', async () => {
+    const conv = [...state.values()].filter(e => e.jpegBlob);
+    if (!conv.length) return;
+    if (typeof JSZip !== 'undefined') {
+      setStatus('Building zip…');
+      try {
+        const zip = new JSZip();
+        const used = new Set();
+        for (const e of conv) {
+          let n = e.outName, i = 1;
+          while (used.has(n.toLowerCase())) {
+            n = e.outName.replace(/\.jpg$/i, '') + ' (' + i + ').jpg';
+            i++;
+          }
+          used.add(n.toLowerCase());
+          zip.file(n, e.jpegBlob);
+        }
+        const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+        saveBlob(blob, 'png-to-jpeg.zip');
+        setStatus('Downloaded zip with ' + conv.length + ' JPEG' + (conv.length > 1 ? 's' : '') + '.');
+        return;
+      } catch (_) { /* fall through to individual downloads */ }
+    }
+    setStatus('Zip unavailable — downloading individually…');
+    for (const e of conv) {
+      saveBlob(e.jpegBlob, e.outName);
+      await new Promise(r => setTimeout(r, 350));
+    }
+  });
+
+  btnClear.addEventListener('click', () => {
+    for (const e of state.values()) URL.revokeObjectURL(e.objUrl);
+    state.clear();
+    grid.innerHTML = '';
+    totalsBar.hidden = true; totalsBar.innerHTML = '';
+    updateChrome();
+    resetConvertLabel();
+    setStatus('Cleared.');
+  });
+
+  /* ---------- inputs ---------- */
+  quality.addEventListener('input', () => { qualityVal.textContent = quality.value; });
+
+  document.querySelectorAll('.swatch[data-c]').forEach(sw => {
+    sw.addEventListener('click', () => {
+      document.querySelectorAll('.swatch').forEach(x => { x.classList.remove('sel'); x.setAttribute('aria-checked', 'false'); });
+      sw.classList.add('sel');
+      sw.setAttribute('aria-checked', 'true');
+      matte = sw.dataset.c;
+    });
+  });
+  customMatte.addEventListener('input', () => {
+    document.querySelectorAll('.swatch').forEach(x => { x.classList.remove('sel'); x.setAttribute('aria-checked', 'false'); });
+    const label = customMatte.closest('.swatch');
+    label.classList.add('sel');
+    label.setAttribute('aria-checked', 'true');
+    matte = customMatte.value;
+  });
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); fileInput.click(); }
+  });
+  fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value = ''; });
+
+  let dragDepth = 0;
+  window.addEventListener('dragover', (ev) => { ev.preventDefault(); });
+  window.addEventListener('dragenter', (ev) => {
+    ev.preventDefault();
+    if (ev.dataTransfer && [...ev.dataTransfer.types].includes('Files')) {
+      dragDepth++;
+      dropzone.classList.add('drag');
+    }
+  });
+  window.addEventListener('dragleave', (ev) => {
+    if (--dragDepth <= 0) { dragDepth = 0; dropzone.classList.remove('drag'); }
+  });
+  window.addEventListener('drop', (ev) => {
+    ev.preventDefault();
+    dragDepth = 0;
+    dropzone.classList.remove('drag');
+    if (ev.dataTransfer && ev.dataTransfer.files) addFiles(ev.dataTransfer.files);
+  });
+
+  document.addEventListener('paste', (ev) => {
+    const files = [...(ev.clipboardData ? ev.clipboardData.items : [])]
+      .filter(it => it.kind === 'file')
+      .map(it => it.getAsFile())
+      .filter(Boolean);
+    if (files.length) { addFiles(files); setStatus('Pasted ' + files.length + ' image' + (files.length > 1 ? 's' : '') + ' from clipboard.'); }
+  });
+})();
+</script>
+</body>
+</html>
